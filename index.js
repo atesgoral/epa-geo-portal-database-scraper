@@ -1,10 +1,14 @@
+const fs = require('fs');
+
+const request = require('request');
 const rp = require('request-promise-native');
 const cheerio = require('cheerio');
+const unzip = require('unzip');
 
 const config = {
   indexUrl: process.env.SCRAPER_INDEX_URL || 'http://gis.epa.ie/GetData/Download',
   downloadUrl: process.env.SCRAPER_DOWNLOAD_URL || 'http://gis.epa.ie/getdata/downloaddata',
-  email: process.env.SCRAPER_EMAIL,
+  mailbackMailbox: process.env.SCRAPER_MAILBACK_MAILBOX,
   maxDocs: parseInt(process.env.SCRAPER_MAX_DOCS, 10) || Infinity
 };
 
@@ -38,14 +42,16 @@ getIdList()
   .then(idList => {
     console.log(`Got ${idList.length} IDs`);
 
+    const email = config.mailbackMailbox + '@mail.mailback.io';
+
     return enqueue(idList.slice(0, config.maxDocs), id => {
       const options = {
         uri: config.downloadUrl,
         method: 'POST',
         form: {
           SelectedFile: id,
-          Email: config.email,
-          reEmail: config.email,
+          Email: email,
+          reEmail: email,
           'X-Requested-With': 'XMLHttpRequest'
         }
       };
@@ -53,6 +59,16 @@ getIdList()
       return rp(options)
         .then(response => {
           console.log(`Submitted request for ID ${id}`)
+
+          return new Promise((resolve, reject) => {
+            request(`http://mailback.io/go/${config.mailbackMailbox}`)
+              .pipe(unzip.Extract({ path: `archive/${id}` }))
+              .on('finish', resolve)
+              .on('error', reject);
+          });
+        })
+        .then(response => {
+          console.log('Archived');
         })
         .catch(error => {
           console.error('Fetch failed', error);
